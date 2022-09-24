@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,6 +17,7 @@ import white.service.UserService;
 
 import javax.servlet.http.HttpServletRequest;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @RequestMapping("/user")
@@ -23,33 +25,39 @@ import java.util.Map;
 public class UserController {
     @Autowired
     private UserService userService;
+    @Autowired
+    private RedisTemplate redisTemplate;
+
     @PostMapping("/sendMsg")
-    public R<String> sendMsg(@RequestBody User user, HttpServletRequest request){
+    public R<String> sendMsg(@RequestBody User user, HttpServletRequest request) {
         String phone = user.getPhone();
-        if (StringUtils.isNotEmpty(phone)){
+        if (StringUtils.isNotEmpty(phone)) {
             String code = ValidateCodeUtils.generateValidateCode4String(6);
-            log.info("code :{}",code);
-            request.getSession().setAttribute(phone,code);
+            log.info("code :{}", code);
+//            request.getSession().setAttribute(phone,code);
+            redisTemplate.opsForValue().set(phone, code, 5, TimeUnit.MINUTES);
             return R.success("短信验证码发送成功");
         }
         return R.error("短信发送失败");
     }
     @PostMapping("/login")
-    public R<User> login(@RequestBody Map user, HttpServletRequest request){
-        String phone =  user.get("phone").toString();
-        String code = (String)request.getSession().getAttribute(phone);
-        String code1 = (String)user.get("code");
-        if (code != null && code.equals(code1)){
+    public R<User> login(@RequestBody Map user, HttpServletRequest request) {
+        String phone = user.get("phone").toString();
+//        String code = (String)request.getSession().getAttribute(phone);
+        String code = (String) redisTemplate.opsForValue().get(phone);
+        String code1 = (String) user.get("code");
+        if (code != null && code.equals(code1)) {
             LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(User::getPhone,phone);
+            wrapper.eq(User::getPhone, phone);
             User user1 = userService.getOne(wrapper);
-            if(user1 == null){
+            if (user1 == null) {
                 user1 = new User();
                 user1.setPhone(phone);
                 user1.setStatus(1);
                 userService.save(user1);
             }
-            request.getSession().setAttribute("user",user1.getId());
+            request.getSession().setAttribute("user", user1.getId());
+            redisTemplate.delete(phone);
             return R.success(user1);
         }
         return R.error("登录失败");
